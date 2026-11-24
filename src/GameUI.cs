@@ -65,11 +65,12 @@ internal sealed class GameUI : IDisposable
         Scan(x,y,w,h,false,words);
         return words;
     }
-    string Scan(int x,int y,int w,int h,bool latin,List<Word> words){
+    public string ReadNick(int scale){return Scan(787,522,385,50,false,null,scale).Trim();}
+    string Scan(int x,int y,int w,int h,bool latin,List<Word> words,int scale=2){
         Rectangle client=Client();
         int cw=Math.Max(1,w*client.Width/1920),ch=Math.Max(1,h*client.Height/1080);
         using(var crop=new Bitmap(cw,ch))
-        using(var scaled=new Bitmap(w*2,h*2,PixelFormat.Format32bppArgb)){
+        using(var scaled=new Bitmap(w*scale,h*scale,PixelFormat.Format32bppArgb)){
             using(var g=Graphics.FromImage(crop))g.CopyFromScreen(client.X+x*client.Width/1920,client.Y+y*client.Height/1080,0,0,crop.Size);
             using(var g=Graphics.FromImage(scaled)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(crop,new Rectangle(0,0,scaled.Width,scaled.Height));}
             return Recognize(scaled,latin?en:ru,x,y,words,Check);
@@ -117,14 +118,28 @@ internal sealed class GameUI : IDisposable
     public static bool Joined(string s){return Regex.IsMatch(s,@"присоедин|вош[её]л.{0,18}(лобби|групп)|вступил.{0,18}(лобби|групп)",RegexOptions.IgnoreCase);}
     public static bool Limited(string s){return Regex.IsMatch(s,@"слишком много приглашений|достигнут лимит приглашений|превышен лимит приглашений",RegexOptions.IgnoreCase);}
     public static string Key(string s){return Regex.Replace(s.Trim().Normalize().ToLowerInvariant(),@"\s+","");}
+    internal static bool NickMatches(string observed,string expected){
+        string a=Key(observed),b=Key(expected);
+        if(a==b)return true;
+        if(a.Length!=b.Length)return false;
+        int substitutions=0;
+        for(int i=0;i<a.Length;i++){
+            if(a[i]==b[i])continue;
+            if(++substitutions>1 || !(a[i]=='.' && b[i]=='-' || a[i]=='-' && b[i]=='.'))return false;
+            if(i==0 || i+1==a.Length || !Char.IsLetterOrDigit(b[i-1]) || !Char.IsLetterOrDigit(b[i+1]))return false;
+        }
+        return true;
+    }
     public static bool Sent(string notices,string nick){
         if(String.IsNullOrWhiteSpace(nick))return false;
         foreach(string line in notices.Split('\n')){
             var m=Regex.Match(line,@"приглашает\s+(.+)$",RegexOptions.IgnoreCase);
-            if(m.Success && Key(m.Groups[1].Value)==Key(nick))return true;
+            if(m.Success && NickMatches(m.Groups[1].Value,nick))return true;
         }return false;
     }
 }
+
+
 
 
 

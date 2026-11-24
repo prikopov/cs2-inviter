@@ -170,8 +170,15 @@ sealed partial class QueueWindow : Form
         await Until(g,t,title,x=>Has(x,"по коду друга"),3500,"Поиск по коду не открылся.");
         g.InsertCode(code);
         await Until(g,t,()=>g.Read(730,468,260,39,true),x=>GameUI.Key(x)==GameUI.Key(code),3000,"CS2 не подтвердила введённый код.");
+        g.Move(680,730); // Clear the cursor and tooltip from the nickname before OCR.
         string nick=await Until(g,t,()=>g.Read(787,522,385,50,true).Trim(),x=>x.Length>0&&!Has(x,"unknown")&&!x.Contains("\n"),6000,"Профиль не загрузился.");
-        string alternate=g.Read(787,522,385,50).Trim();
+        var votes=new[]{g.ReadNick(1),g.ReadNick(2),g.ReadNick(3),g.ReadNick(4)}
+            .Where(x=>x.Length>0 && !x.Contains("\n"))
+            .GroupBy(GameUI.Key).OrderByDescending(group=>group.Count()).FirstOrDefault();
+        string alternate=votes!=null && votes.Count()>=2?votes.First():"";
+        if(System.Text.RegularExpressions.Regex.IsMatch(alternate,@"[А-Яа-яЁё]")){
+            string latin=nick;nick=alternate;alternate=latin;
+        }
         g.Click(820,542);
         await Wait(g,t,1000);
         string before=g.Notices();
@@ -245,6 +252,8 @@ sealed partial class QueueWindow : Form
         }
     }
 }
+
+
 
 
 
