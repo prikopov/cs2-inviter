@@ -116,6 +116,29 @@ sealed partial class QueueWindow : Form
         throw new InvalidOperationException(failure);
     }
     static bool Has(string s,string text){return GameUI.Key(s).Contains(GameUI.Key(text));}
+    static async Task CloseSearch(GameUI g,CancellationToken t,Func<string> title){
+        var timeout=Stopwatch.StartNew();
+        bool dismissed=false;
+        int cancelClicks=0,missing=0;
+        while(timeout.ElapsedMilliseconds<6500){
+            Guard(g,t);
+            if(g.CardAction().HasValue){
+                missing=0;
+                if(!dismissed){g.Check();SendKeys.SendWait("{ESC}");dismissed=true;}
+            }else if(Has(title(),"по коду друга")){
+                missing=0;
+                var matches=g.Words(700,530,605,235).Where(w=>GameUI.Key(w.Text)=="отмена").ToArray();
+                if(matches.Length==1 && cancelClicks<2){
+                    g.Click(matches[0].Center.X,matches[0].Center.Y);
+                    cancelClicks++;await Task.Delay(350,t);
+                }
+            }else if(Has(g.Read(650,0,630,75),"играть") && ++missing>=2){
+                return;
+            }
+            await Task.Delay(130,t);
+        }
+        throw new InvalidOperationException("Не удалось подтвердить закрытие поиска. Очередь на паузе.");
+    }
     async Task<bool> Invite(GameUI g,Entry entry,CancellationToken t){
         string code=FriendCode.ConvertId(entry.Id);
         string initial=g.Notices();
@@ -130,21 +153,26 @@ sealed partial class QueueWindow : Form
         await Until(g,t,title,x=>Has(x,"по коду друга"),3500,"Поиск по коду не открылся.");
         g.InsertCode(code);
         await Until(g,t,()=>g.Read(730,468,260,39,true),x=>GameUI.Key(x)==GameUI.Key(code),3000,"CS2 не подтвердила введённый код.");
-        await Until(g,t,()=>g.Read(787,522,385,50,true),x=>x.Trim().Length>0&&!Has(x,"unknown"),6000,"Профиль не загрузился.");
+        string nick=await Until(g,t,()=>g.Read(787,522,385,50,true).Trim(),x=>x.Length>0&&!Has(x,"unknown")&&!x.Contains("\n"),6000,"Профиль не загрузился.");
+        string alternate=g.Read(787,522,385,50).Trim();
         g.Click(820,542);
-        await Until(g,t,()=>g.Read(852,560,148,70),x=>Has(x,"пригласить") || Has(x,"приглаочть"),3500,"Не распознана кнопка приглашения в карточке.");
-        string nick=g.Read(933,473,290,73,true).Trim();
-        if(nick.Length==0||nick.Contains("\n"))throw new InvalidOperationException("Не удалось прочитать ник.");
-        string before=g.Notices();if(GameUI.Sent(before,nick)||GameUI.Sent(initial,nick))throw new InvalidOperationException("На экране ещё видна предыдущая отправка этому игроку.");
-        Guard(g,t); entry.Nick=nick;entry.State=Unknown;Save();RefreshRows();
-        g.Click(918,595);await Task.Delay(220,t);
-        // A modal can obscure the lobby notification. Dismiss only the verified Cancel action.
-        if(Has(g.Read(1090,619,115,60),"отмена")){Guard(g,t);g.Click(1140,648);}
+        Point? target=null;
+        await Until(g,t,()=>{target=g.CardAction();return target.HasValue?"ok":"";},x=>x=="ok",4500,"Не удалось найти строку действий профиля.");
+        string before=g.Notices();
+        Func<string,bool> sent=n=>GameUI.Sent(n,nick) || (!alternate.Contains("\n") && GameUI.Sent(n,alternate));
+        if(sent(before)||sent(initial))throw new InvalidOperationException("На экране ещё видна предыдущая отправка этому игроку.");
+        Guard(g,t);
+        var verified=g.CardAction();
+        if(!verified.HasValue || !target.Value.Equals(verified.Value))throw new InvalidOperationException("Карточка сместилась. Повторите запуск.");
+        entry.Nick=nick;entry.State=Unknown;Save();RefreshRows();
+        g.Click(verified.Value.X,verified.Value.Y);
+        await Task.Delay(250,t);
+        await CloseSearch(g,t,title);
         var watch=Stopwatch.StartNew();
         while(watch.ElapsedMilliseconds<8000){
             t.ThrowIfCancellationRequested();g.Check();string notice=g.Notices();
             bool joined=GameUI.Joined(notice);
-            if(GameUI.Sent(notice,nick)){entry.State=Done;Save();RefreshRows();if(joined)throw new OperationCanceledException("В лобби вошёл игрок.");return true;}
+            if(sent(notice)){entry.State=Done;Save();RefreshRows();if(joined)throw new OperationCanceledException("В лобби вошёл игрок.");return true;}
             if(joined)throw new OperationCanceledException("В лобби вошёл игрок.");
             if(GameUI.Limited(notice)&&!GameUI.Limited(before))return false;
             await Task.Delay(160,t);
@@ -184,6 +212,7 @@ sealed partial class QueueWindow : Form
         }
     }
 }
+
 
 
 
