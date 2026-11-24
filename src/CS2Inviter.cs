@@ -53,6 +53,18 @@ public sealed class Saved {
     public int Delay {get;set;}
     public List<Entry> Rows {get;set;}
 }
+internal sealed class CardStability {
+    Point? anchor;
+    long since;
+    public bool Ready(Point? current,long milliseconds){
+        if(!current.HasValue || !anchor.HasValue ||
+           Math.Abs(current.Value.X-anchor.Value.X)>3 || Math.Abs(current.Value.Y-anchor.Value.Y)>3){
+            anchor=current;since=milliseconds;return false;
+        }
+        return milliseconds-since>=600;
+    }
+}
+
 sealed partial class QueueWindow : Form
 {
     const string Ready="В очереди", Unknown="Проверить отправку", Done="Отправлено";
@@ -156,16 +168,32 @@ sealed partial class QueueWindow : Form
         string nick=await Until(g,t,()=>g.Read(787,522,385,50,true).Trim(),x=>x.Length>0&&!Has(x,"unknown")&&!x.Contains("\n"),6000,"Профиль не загрузился.");
         string alternate=g.Read(787,522,385,50).Trim();
         g.Click(820,542);
-        Point? target=null;
-        await Until(g,t,()=>{target=g.CardAction();return target.HasValue?"ok":"";},x=>x=="ok",4500,"Не удалось найти строку действий профиля.");
+        await Wait(g,t,1000);
         string before=g.Notices();
         Func<string,bool> sent=n=>GameUI.Sent(n,nick) || (!alternate.Contains("\n") && GameUI.Sent(n,alternate));
         if(sent(before)||sent(initial))throw new InvalidOperationException("На экране ещё видна предыдущая отправка этому игроку.");
-        Guard(g,t);
-        var verified=g.CardAction();
-        if(!verified.HasValue || !target.Value.Equals(verified.Value))throw new InvalidOperationException("Карточка сместилась. Повторите запуск.");
-        entry.Nick=nick;entry.State=Unknown;Save();RefreshRows();
-        g.Click(verified.Value.X,verified.Value.Y);
+        var deadline=Stopwatch.StartNew();
+        var stability=new CardStability();
+        bool clicked=false;
+        while(deadline.ElapsedMilliseconds<8000){
+            Guard(g,t);
+            Point? current=g.CardAction();
+            if(stability.Ready(current,deadline.ElapsedMilliseconds)){
+                entry.Nick=nick;entry.State=Unknown;Save();
+                // Persist before sending, then sample once more after the disk write.
+                var latest=g.CardAction();
+                if(latest.HasValue && stability.Ready(latest,deadline.ElapsedMilliseconds)){
+                    t.ThrowIfCancellationRequested();
+                    g.Click(latest.Value.X,latest.Value.Y);
+                    clicked=true;
+                    break;
+                }
+                entry.State=Ready;Save();
+            }
+            await Task.Delay(120,t);
+        }
+        if(!clicked)throw new InvalidOperationException("Положение кнопки приглашения не подтвердилось. Очередь на паузе.");
+        RefreshRows();
         await Task.Delay(250,t);
         await CloseSearch(g,t,title);
         var watch=Stopwatch.StartNew();
@@ -212,6 +240,7 @@ sealed partial class QueueWindow : Form
         }
     }
 }
+
 
 
 
