@@ -136,7 +136,12 @@ sealed partial class QueueWindow : Form
             Guard(g,t);
             if(g.CardAction().HasValue){
                 missing=0;
-                if(!dismissed){g.Check();SendKeys.SendWait("{ESC}");dismissed=true;}
+                if(!dismissed){
+                    // Stay inside the game client, clear of the profile and menu buttons.
+                    g.Click(4,4);
+                    dismissed=true;
+                    await Task.Delay(250,t);
+                }
             }else if(Has(title(),"по коду друга")){
                 missing=0;
                 var matches=g.Words(700,530,605,235).Where(w=>GameUI.Key(w.Text)=="отмена").ToArray();
@@ -240,6 +245,7 @@ sealed partial class QueueWindow : Form
         }
     }
 }
+
 
 
 
