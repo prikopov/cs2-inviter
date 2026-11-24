@@ -141,8 +141,8 @@ internal sealed class GameUI : IDisposable
                 string name=String.Join(" ",english.Where(w=>Math.Abs(w.Center.Y-verb.Center.Y)<=5 && w.Center.X>verb.Center.X+20)
                     .OrderBy(w=>w.Center.X).Select(w=>w.Text));
                 if(name.Length>0 && (NickMatches(name,nick) || NickMatches(name,alternate)))return true;
-                var tagged=Regex.Match(name,@"^\[[^\[\]\s]{1,12}\]\s+(.+)$");
-                if(tagged.Success && latinConsensus.Length>=4 && NickMatches(tagged.Groups[1].Value,latinConsensus))return true;
+                var tagged=Regex.Match(name,@"^[\[(][^\[\]\s]{1,12}\]\s+(.+)$");
+                if(tagged.Success && latinConsensus.Length>=3 && Key(tagged.Groups[1].Value)==Key(latinConsensus))return true;
             }
         }
         return false;
@@ -161,10 +161,20 @@ internal sealed class GameUI : IDisposable
         int substitutions=0;
         for(int i=0;i<a.Length;i++){
             if(a[i]==b[i])continue;
-            if(++substitutions>1 || !(a[i]=='.' && b[i]=='-' || a[i]=='-' && b[i]=='.'))return false;
-            if(i==0 || i+1==a.Length || !Char.IsLetterOrDigit(b[i-1]) || !Char.IsLetterOrDigit(b[i+1]))return false;
+            if(++substitutions>1)return false;
+            if((a[i]=='.' && b[i]=='-') || (a[i]=='-' && b[i]=='.')){
+                if(i==0 || i+1==a.Length || !Char.IsLetterOrDigit(b[i-1]) || !Char.IsLetterOrDigit(b[i+1]))return false;
+                continue;
+            }
+            if(a.Length<6 || !SimilarGlyph(a[i],b[i]))return false;
         }
         return true;
+    }
+    static bool SimilarGlyph(char a,char b){
+        foreach(string group in new[]{"il1","oо0","aа","cс","eе","pр","xх"}){
+            if(group.IndexOf(a)>=0 && group.IndexOf(b)>=0)return true;
+        }
+        return false;
     }
     public static bool Sent(string notices,string nick){
         if(String.IsNullOrWhiteSpace(nick))return false;
