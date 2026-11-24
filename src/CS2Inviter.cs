@@ -128,12 +128,16 @@ sealed partial class QueueWindow : Form
         throw new InvalidOperationException(failure);
     }
     static bool Has(string s,string text){return GameUI.Key(s).Contains(GameUI.Key(text));}
-    static async Task CloseSearch(GameUI g,CancellationToken t,Func<string> title){
+    static async Task CloseSearch(GameUI g,CancellationToken t,Func<string> title,Action<string> observeNotice){
         var timeout=Stopwatch.StartNew();
         bool dismissed=false;
         int cancelClicks=0,missing=0;
         while(timeout.ElapsedMilliseconds<6500){
-            Guard(g,t);
+            t.ThrowIfCancellationRequested();
+            g.Check();
+            string notice=g.Notices();
+            observeNotice(notice);
+            if(GameUI.Joined(notice))throw new OperationCanceledException("В лобби вошёл игрок.");
             if(g.CardAction().HasValue){
                 missing=0;
                 if(!dismissed){
@@ -169,7 +173,7 @@ sealed partial class QueueWindow : Form
         }
         await Until(g,t,title,x=>Has(x,"по коду друга"),3500,"Поиск по коду не открылся.");
         g.InsertCode(code);
-        await Until(g,t,()=>g.Read(730,468,260,39,true),x=>GameUI.Key(x)==GameUI.Key(code),3000,"CS2 не подтвердила введённый код.");
+        await Until(g,t,()=>g.ReadCode(code),x=>GameUI.Key(x)==GameUI.Key(code),3000,"CS2 не подтвердила введённый код.");
         g.Move(680,730); // Clear the cursor and tooltip from the nickname before OCR.
         string nick=await Until(g,t,()=>g.Read(787,522,385,50,true).Trim(),x=>x.Length>0&&!Has(x,"unknown")&&!x.Contains("\n"),6000,"Профиль не загрузился.");
         var votes=new[]{g.ReadNick(1),g.ReadNick(2),g.ReadNick(3),g.ReadNick(4)}
@@ -179,10 +183,14 @@ sealed partial class QueueWindow : Form
         if(System.Text.RegularExpressions.Regex.IsMatch(alternate,@"[А-Яа-яЁё]")){
             string latin=nick;nick=alternate;alternate=latin;
         }
+        var latinVotes=new[]{g.ReadNick(2,true),g.ReadNick(4,true),g.ReadNick(5,true)}
+            .Where(x=>x.Length>0 && !x.Contains("\n")).GroupBy(GameUI.Key)
+            .FirstOrDefault(group=>group.Count()>=2);
+        string latinConsensus=latinVotes==null?"":latinVotes.First();
         g.Click(820,542);
         await Wait(g,t,1000);
         string before=g.Notices();
-        Func<string,bool> sent=n=>GameUI.Sent(n,nick) || (!alternate.Contains("\n") && GameUI.Sent(n,alternate));
+        Func<string,bool> sent=n=>g.HasReceipt(n,nick,alternate,latinConsensus);
         if(sent(before)||sent(initial))throw new InvalidOperationException("На экране ещё видна предыдущая отправка этому игроку.");
         var deadline=Stopwatch.StartNew();
         var stability=new CardStability();
@@ -207,7 +215,11 @@ sealed partial class QueueWindow : Form
         if(!clicked)throw new InvalidOperationException("Положение кнопки приглашения не подтвердилось. Очередь на паузе.");
         RefreshRows();
         await Task.Delay(250,t);
-        await CloseSearch(g,t,title);
+        Action<string> recordReceipt=notice=>{
+            if(entry.State!=Done && sent(notice)){entry.State=Done;Save();RefreshRows();}
+        };
+        await CloseSearch(g,t,title,recordReceipt);
+        if(entry.State==Done)return true;
         var watch=Stopwatch.StartNew();
         while(watch.ElapsedMilliseconds<8000){
             t.ThrowIfCancellationRequested();g.Check();string notice=g.Notices();

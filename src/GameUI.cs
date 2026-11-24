@@ -65,7 +65,15 @@ internal sealed class GameUI : IDisposable
         Scan(x,y,w,h,false,words);
         return words;
     }
-    public string ReadNick(int scale){return Scan(787,522,385,50,false,null,scale).Trim();}
+    public string ReadCode(string expected){
+        string last="";
+        foreach(int scale in new[]{2,3,4}){
+            last=Scan(730,468,260,39,true,null,scale);
+            if(Key(last)==Key(expected))break;
+        }
+        return last;
+    }
+    public string ReadNick(int scale,bool latin=false){return Scan(787,522,385,50,latin,null,scale).Trim();}
     string Scan(int x,int y,int w,int h,bool latin,List<Word> words,int scale=2){
         Rectangle client=Client();
         int cw=Math.Max(1,w*client.Width/1920),ch=Math.Max(1,h*client.Height/1080);
@@ -115,11 +123,39 @@ internal sealed class GameUI : IDisposable
     }
     public Point? CardAction(){return InviteTarget(Words(660,160,860,720));}
     public string Notices(){return Read(1320,0,540,175);}
+    public bool HasReceipt(string text,string nick,string alternate,string latinConsensus){
+        if(Sent(text,nick) || Sent(text,alternate))return true;
+        const int x=1320,y=0,width=540,height=175;
+        if(text.IndexOf("приглашает",StringComparison.OrdinalIgnoreCase)<0)return false;
+        Rectangle client=Client();
+        using(var crop=new Bitmap(Math.Max(1,width*client.Width/1920),Math.Max(1,height*client.Height/1080)))
+        using(var frame=new Bitmap(width*2,height*2,PixelFormat.Format32bppArgb)){
+            using(var g=Graphics.FromImage(crop))g.CopyFromScreen(client.X+x*client.Width/1920,client.Y+y,0,0,crop.Size);
+            using(var g=Graphics.FromImage(frame))g.DrawImage(crop,new Rectangle(Point.Empty,frame.Size));
+            var words=new List<Word>();
+            string russian=Recognize(frame,ru,0,0,words,Check);
+            if(Sent(russian,nick) || Sent(russian,alternate))return true;
+            var english=new List<Word>();
+            Recognize(frame,en,0,0,english,Check);
+            foreach(var verb in words.Where(w=>Key(w.Text)=="приглашает")){
+                string name=String.Join(" ",english.Where(w=>Math.Abs(w.Center.Y-verb.Center.Y)<=5 && w.Center.X>verb.Center.X+20)
+                    .OrderBy(w=>w.Center.X).Select(w=>w.Text));
+                if(name.Length>0 && (NickMatches(name,nick) || NickMatches(name,alternate)))return true;
+                var tagged=Regex.Match(name,@"^\[[^\[\]\s]{1,12}\]\s+(.+)$");
+                if(tagged.Success && latinConsensus.Length>=4 && NickMatches(tagged.Groups[1].Value,latinConsensus))return true;
+            }
+        }
+        return false;
+    }
     public static bool Joined(string s){return Regex.IsMatch(s,@"присоедин|вош[её]л.{0,18}(лобби|групп)|вступил.{0,18}(лобби|групп)",RegexOptions.IgnoreCase);}
     public static bool Limited(string s){return Regex.IsMatch(s,@"слишком много приглашений|достигнут лимит приглашений|превышен лимит приглашений",RegexOptions.IgnoreCase);}
     public static string Key(string s){return Regex.Replace(s.Trim().Normalize().ToLowerInvariant(),@"\s+","");}
+    static string NicknameKey(string nick){
+        // OCR can render the closing bracket of a leading clan tag as I or l.
+        return Key(Regex.Replace(nick.Trim(),@"^(\[[^\[\]\s]{1,12})[Il](?=\s)","$1]"));
+    }
     internal static bool NickMatches(string observed,string expected){
-        string a=Key(observed),b=Key(expected);
+        string a=NicknameKey(observed),b=NicknameKey(expected);
         if(a==b)return true;
         if(a.Length!=b.Length)return false;
         int substitutions=0;
